@@ -8,6 +8,7 @@ import kotlinx.coroutines.flow.Flow
 
 interface MealRepository {
     suspend fun getHomeFeed(): Resource<List<MealFeedItem>>
+    suspend fun loadMoreMeals(count: Int = 6): Resource<List<MealFeedItem>>
     suspend fun getCategories(): Resource<List<Category>>
     suspend fun getMealsByCategory(category: String): Resource<List<MealFeedItem>>
     suspend fun getMealDetail(idMeal: String): Resource<MealDetail>

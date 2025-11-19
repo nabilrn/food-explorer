@@ -31,8 +31,8 @@ class MealRepositoryImpl(
     override suspend fun getHomeFeed(): Resource<List<MealFeedItem>> = withContext(Dispatchers.IO) {
         // Check if network is available
         if (!NetworkUtils.isNetworkAvailable(context)) {
-            // No internet - load 10 items from cache
-            val cachedMeals = mealFeedDao.getLimit(10).map { it.toModel() }
+            // No internet - load from cache
+            val cachedMeals = mealFeedDao.getLimit(20).map { it.toModel() }
             return@withContext if (cachedMeals.isNotEmpty()) {
                 Resource.Success(cachedMeals)
             } else {
@@ -40,52 +40,39 @@ class MealRepositoryImpl(
             }
         }
 
-        // Internet available - fetch from API
+        // Internet available - fetch random meals with full details
         try {
-            val categoriesResponse = apiService.getCategories()
-            if (!categoriesResponse.isSuccessful) {
-                // If API fails, try loading 10 items from cache
-                val cachedMeals = mealFeedDao.getLimit(10).map { it.toModel() }
-                return@withContext if (cachedMeals.isNotEmpty()) {
-                    Resource.Success(cachedMeals)
-                } else {
-                    Resource.Error("Failed to load categories: ${categoriesResponse.message()}")
-                }
-            }
-
-            val categories = categoriesResponse.body()?.categories
-                ?.take(5)
-                ?: run {
-                    val cachedMeals = mealFeedDao.getLimit(10).map { it.toModel() }
-                    return@withContext if (cachedMeals.isNotEmpty()) {
-                        Resource.Success(cachedMeals)
-                    } else {
-                        Resource.Error("Categories not available")
-                    }
-                }
-
             val allMeals = mutableListOf<MealFeedItem>()
-            categories.forEach { category ->
-                val name = category.strCategory ?: return@forEach
+
+            // Fetch only 6 random meals initially for faster loading
+            repeat(6) {
                 try {
-                    val mealsResponse = apiService.getMealsByCategory(name)
-                    if (mealsResponse.isSuccessful) {
-                        mealsResponse.body()?.meals?.let { allMeals.addAll(it) }
+                    val randomResponse = apiService.getRandomMeal()
+                    if (randomResponse.isSuccessful) {
+                        randomResponse.body()?.meals?.firstOrNull()?.let { mealRaw ->
+                            val mealFeedItem = MealFeedItem(
+                                idMeal = mealRaw.idMeal,
+                                strMeal = mealRaw.strMeal,
+                                strMealThumb = mealRaw.strMealThumb,
+                                strCategory = mealRaw.strCategory,
+                                strArea = mealRaw.strArea
+                            )
+                            allMeals.add(mealFeedItem)
+                        }
                     }
                 } catch (e: Exception) {
-                    // Continue with other categories even if one fails
+                    // Continue with other random meals even if one fails
                 }
             }
 
             if (allMeals.isNotEmpty()) {
-                allMeals.shuffle()
                 // Save to cache
                 mealFeedDao.deleteAll()
                 mealFeedDao.insertAll(allMeals.map { it.toEntity() })
                 Resource.Success(allMeals)
             } else {
-                // If no meals from API, load 10 items from cache
-                val cachedMeals = mealFeedDao.getLimit(10).map { it.toModel() }
+                // If no meals from API, load from cache
+                val cachedMeals = mealFeedDao.getLimit(20).map { it.toModel() }
                 if (cachedMeals.isNotEmpty()) {
                     Resource.Success(cachedMeals)
                 } else {
@@ -93,13 +80,53 @@ class MealRepositoryImpl(
                 }
             }
         } catch (e: Exception) {
-            // On any error, try loading 10 items from cache
-            val cachedMeals = mealFeedDao.getLimit(10).map { it.toModel() }
+            // On any error, try loading from cache
+            val cachedMeals = mealFeedDao.getLimit(20).map { it.toModel() }
             if (cachedMeals.isNotEmpty()) {
                 Resource.Success(cachedMeals)
             } else {
                 Resource.Error("Couldn't fetch feed. Please check your internet connection.", e)
             }
+        }
+    }
+
+    override suspend fun loadMoreMeals(count: Int): Resource<List<MealFeedItem>> = withContext(Dispatchers.IO) {
+        if (!NetworkUtils.isNetworkAvailable(context)) {
+            return@withContext Resource.Error("No internet connection")
+        }
+
+        try {
+            val newMeals = mutableListOf<MealFeedItem>()
+
+            repeat(count) {
+                try {
+                    val randomResponse = apiService.getRandomMeal()
+                    if (randomResponse.isSuccessful) {
+                        randomResponse.body()?.meals?.firstOrNull()?.let { mealRaw ->
+                            val mealFeedItem = MealFeedItem(
+                                idMeal = mealRaw.idMeal,
+                                strMeal = mealRaw.strMeal,
+                                strMealThumb = mealRaw.strMealThumb,
+                                strCategory = mealRaw.strCategory,
+                                strArea = mealRaw.strArea
+                            )
+                            newMeals.add(mealFeedItem)
+                        }
+                    }
+                } catch (e: Exception) {
+                    // Continue with other random meals even if one fails
+                }
+            }
+
+            if (newMeals.isNotEmpty()) {
+                // Append to cache
+                mealFeedDao.insertAll(newMeals.map { it.toEntity() })
+                Resource.Success(newMeals)
+            } else {
+                Resource.Error("Failed to load more meals")
+            }
+        } catch (e: Exception) {
+            Resource.Error("Couldn't load more meals. Please check your internet connection.", e)
         }
     }
 
@@ -116,7 +143,8 @@ class MealRepositoryImpl(
     override suspend fun getMealsByCategory(category: String): Resource<List<MealFeedItem>> = safeApiCall {
         val response = apiService.getMealsByCategory(category)
         if (response.isSuccessful) {
-            Resource.Success(response.body()?.meals ?: emptyList())
+            val meals = response.body()?.meals?.map { it.copy(strCategory = category) } ?: emptyList()
+            Resource.Success(meals)
         } else {
             Resource.Error("Failed to load meals: ${response.message()}")
         }

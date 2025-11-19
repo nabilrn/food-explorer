@@ -22,7 +22,8 @@ sealed interface FeedUiState {
         val allMeals: List<MealFeedItem> = emptyList(),
         val isSearching: Boolean = false,
         val searchQuery: String = "",
-        val isLoadingCategory: Boolean = false
+        val isLoadingCategory: Boolean = false,
+        val isLoadingMore: Boolean = false
     ) : FeedUiState
 
     data class Error(val message: String) : FeedUiState
@@ -150,7 +151,9 @@ class FeedViewModel(private val repository: MealRepository) : ViewModel() {
                             MealFeedItem(
                                 idMeal = mealDetail.idMeal,
                                 strMeal = mealDetail.strMeal,
-                                strMealThumb = mealDetail.strMealThumb
+                                strMealThumb = mealDetail.strMealThumb,
+                                strCategory = mealDetail.strCategory,
+                                strArea = mealDetail.strArea
                             )
                         }
                         val newState = _state.value
@@ -202,6 +205,37 @@ class FeedViewModel(private val repository: MealRepository) : ViewModel() {
                     when (val result = repository.getMealDetail(mealId)) {
                         is Resource.Success -> repository.saveMeal(result.data)
                         else -> Unit // Handle error if needed
+                    }
+                }
+            }
+        }
+    }
+
+    fun loadMoreMeals() {
+        viewModelScope.launch {
+            val currentState = _state.value
+            if (currentState is FeedUiState.Success &&
+                !currentState.isLoadingMore &&
+                currentState.selectedCategory == null &&
+                !currentState.isSearching) {
+
+                _state.value = currentState.copy(isLoadingMore = true)
+
+                when (val result = repository.loadMoreMeals(6)) {
+                    is Resource.Success -> {
+                        val updatedMeals = currentState.meals + result.data
+                        val updatedAllMeals = currentState.allMeals + result.data
+                        _state.value = currentState.copy(
+                            meals = updatedMeals,
+                            allMeals = updatedAllMeals,
+                            isLoadingMore = false
+                        )
+                    }
+                    is Resource.Error -> {
+                        _state.value = currentState.copy(isLoadingMore = false)
+                    }
+                    else -> {
+                        _state.value = currentState.copy(isLoadingMore = false)
                     }
                 }
             }
