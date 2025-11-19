@@ -1,0 +1,19 @@
+package com.example.foodexplorer.ui.components
+
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.style.TextOverflow
+
+@Composable
+fun MealCaption(text: String, modifier: Modifier = Modifier) {
+    Text(
+        text = text,
+        style = MaterialTheme.typography.bodyMedium,
+        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+        modifier = modifier,
+        maxLines = 2,
+        overflow = TextOverflow.Ellipsis
+    )
+}
