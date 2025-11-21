@@ -2,10 +2,7 @@ package com.example.foodexplorer.ui.detail
 
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
-import androidx.lifecycle.ViewModelProvider
-import androidx.lifecycle.createSavedStateHandle
 import androidx.lifecycle.viewModelScope
-import androidx.lifecycle.viewmodel.CreationExtras
 import com.example.foodexplorer.data.model.MealDetail
 import com.example.foodexplorer.data.repository.MealRepository
 import com.example.foodexplorer.data.util.Resource
@@ -22,7 +19,7 @@ sealed interface DetailUiState {
 
 class DetailViewModel(
     private val repository: MealRepository,
-    private val savedStateHandle: SavedStateHandle
+    savedStateHandle: SavedStateHandle
 ) : ViewModel() {
 
     private val _state: MutableStateFlow<DetailUiState> = MutableStateFlow(DetailUiState.Loading)
@@ -83,17 +80,4 @@ class DetailViewModel(
     }
 }
 
-class DetailViewModelFactory(
-    private val repository: MealRepository,
-    private val mealId: String
-) : ViewModelProvider.Factory {
-    @Suppress("UNCHECKED_CAST")
-    override fun <T : ViewModel> create(modelClass: Class<T>, extras: CreationExtras): T {
-        if (modelClass.isAssignableFrom(DetailViewModel::class.java)) {
-            val savedStateHandle = extras.createSavedStateHandle()
-            savedStateHandle[DetailViewModel.MEAL_ID_KEY] = mealId
-            return DetailViewModel(repository, savedStateHandle) as T
-        }
-        throw IllegalArgumentException("Unknown ViewModel class")
-    }
-}
+

@@ -7,45 +7,197 @@ import com.example.foodexplorer.data.model.Category
 import com.example.foodexplorer.data.model.MealFeedItem
 import com.example.foodexplorer.data.repository.MealRepository
 import com.example.foodexplorer.data.util.Resource
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.FlowPreview
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.filter
+import kotlinx.coroutines.flow.mapLatest
 import kotlinx.coroutines.launch
 
 sealed interface FeedUiState {
     object Loading : FeedUiState
     data class Success(
-        val categories: List<Category>,
-        val meals: List<MealFeedItem>,
+        val categories: List<Category> = emptyList(),
+        val feedMeals: List<MealFeedItem> = emptyList(),
+        val meals: List<MealFeedItem> = emptyList(),
         val savedMealIds: Set<String> = emptySet(),
         val selectedCategory: String? = null,
-        val allMeals: List<MealFeedItem> = emptyList(),
         val isSearching: Boolean = false,
         val searchQuery: String = "",
-        val isLoadingCategory: Boolean = false,
-        val isLoadingMore: Boolean = false
+        val isLoading: Boolean = false,
     ) : FeedUiState
-
     data class Error(val message: String) : FeedUiState
 }
 
 class FeedViewModel(private val repository: MealRepository) : ViewModel() {
 
-    private val _state: MutableStateFlow<FeedUiState> = MutableStateFlow(FeedUiState.Loading)
+    companion object {
+        private const val MAX_FEED_ITEMS = 50 // Increased untuk more scrolling
+        private const val LOAD_MORE_COUNT = 10 // Increased untuk faster pagination
+        private const val SEARCH_DEBOUNCE_MS = 300L
+        private const val MIN_SEARCH_QUERY_LENGTH = 2
+    }
+
+    private val _state = MutableStateFlow<FeedUiState>(FeedUiState.Loading)
     val state: StateFlow<FeedUiState> = _state.asStateFlow()
 
+    private val _searchQuery = MutableStateFlow("")
+    val searchQuery: StateFlow<String> = _searchQuery.asStateFlow()
+
+    private var loadMoreJob: Job? = null
+    private var searchJob: Job? = null
+    private var categoryJob: Job? = null
+
     init {
-        refresh()
+        loadInitialData()
+        observeSearchQuery()
         observeSavedMeals()
+    }
+
+    // Light deduplication - hanya remove consecutive duplicates
+    private fun dedupe(meals: List<MealFeedItem>): List<MealFeedItem> {
+        if (meals.isEmpty()) return meals
+
+        val result = mutableListOf<MealFeedItem>()
+        var lastId: String? = null
+
+        for (meal in meals) {
+            val currentId = meal.idMeal ?: meal.strMeal
+            // Only skip exact consecutive duplicates
+            if (currentId != lastId) {
+                result.add(meal)
+                lastId = currentId
+            }
+        }
+
+        // Return up to MAX_FEED_ITEMS, but don't enforce too strictly
+        return result.take(MAX_FEED_ITEMS)
+    }
+
+    private fun loadInitialData() {
+        viewModelScope.launch {
+            _state.value = FeedUiState.Loading
+
+            try {
+                val categoriesDeferred = async { repository.getCategories() }
+                val mealsDeferred = async { repository.getHomeFeed() }
+
+                val catRes = categoriesDeferred.await()
+                val feedRes = mealsDeferred.await()
+
+                if (catRes is Resource.Success && feedRes is Resource.Success) {
+                    val optimizedMeals = dedupe(feedRes.data)
+
+                    _state.value = FeedUiState.Success(
+                        categories = catRes.data,
+                        feedMeals = optimizedMeals,
+                        meals = optimizedMeals
+                    )
+                } else {
+                    val errorMessage = (catRes as? Resource.Error)?.message
+                        ?: (feedRes as? Resource.Error)?.message
+                        ?: "Failed to load feed"
+                    _state.value = FeedUiState.Error(errorMessage)
+                }
+            } catch (e: Exception) {
+                _state.value = FeedUiState.Error("Error loading feed: ${e.message}")
+            }
+        }
+    }
+
+    fun onSearchQueryChange(query: String) {
+        _searchQuery.value = query
+        val current = _state.value
+        if (current is FeedUiState.Success) {
+            _state.value = current.copy(searchQuery = query)
+        }
+    }
+
+    @OptIn(FlowPreview::class, ExperimentalCoroutinesApi::class)
+    private fun observeSearchQuery() {
+        viewModelScope.launch {
+            searchQuery
+                .debounce(SEARCH_DEBOUNCE_MS)
+                .distinctUntilChanged()
+                .filter { _ ->
+                    val current = _state.value
+                    current is FeedUiState.Success && current.isSearching
+                }
+                .mapLatest { query ->
+                    searchJob?.cancel()
+
+                    if (query.length < MIN_SEARCH_QUERY_LENGTH) {
+                        return@mapLatest null to query
+                    }
+
+                    val current = _state.value as? FeedUiState.Success ?: return@mapLatest null to query
+                    _state.value = current.copy(isLoading = true)
+
+                    repository.searchMeals(query) to query
+                }
+                .catch { _ ->
+                    val current = _state.value as? FeedUiState.Success
+                    if (current != null) {
+                        _state.value = current.copy(isLoading = false)
+                    }
+                }
+                .collect { (result, query) ->
+                    val current = _state.value as? FeedUiState.Success ?: return@collect
+
+                    if (result == null || query.length < MIN_SEARCH_QUERY_LENGTH) {
+                        // Restore feed
+                        _state.value = current.copy(
+                            meals = current.feedMeals,
+                            isLoading = false
+                        )
+                        return@collect
+                    }
+
+                    when (result) {
+                        is Resource.Success -> {
+                            val searchResults = result.data
+                                .asSequence()
+                                .map { detail ->
+                                    MealFeedItem(
+                                        idMeal = detail.idMeal,
+                                        strMeal = detail.strMeal,
+                                        strMealThumb = detail.strMealThumb,
+                                        strCategory = detail.strCategory,
+                                        strArea = detail.strArea
+                                    )
+                                }
+                                .let { dedupe(it.toList()) }
+
+                            _state.value = current.copy(
+                                meals = searchResults,
+                                isLoading = false
+                            )
+                        }
+                        is Resource.Error -> {
+                            _state.value = FeedUiState.Error(result.message)
+                        }
+                        is Resource.Loading -> {
+                            _state.value = current.copy(isLoading = true)
+                        }
+                    }
+                }
+        }
     }
 
     private fun observeSavedMeals() {
         viewModelScope.launch {
-            repository.getSavedMeals().collect { savedMeals ->
-                val currentState = _state.value
-                if (currentState is FeedUiState.Success) {
-                    _state.value = currentState.copy(
-                        savedMealIds = savedMeals.mapNotNull { it.idMeal }.toSet()
+            repository.getSavedMeals().collect { savedDetails ->
+                val current = _state.value
+                if (current is FeedUiState.Success) {
+                    _state.value = current.copy(
+                        savedMealIds = savedDetails.mapNotNull { it.idMeal }.toSet()
                     )
                 }
             }
@@ -53,70 +205,75 @@ class FeedViewModel(private val repository: MealRepository) : ViewModel() {
     }
 
     fun refresh() {
-        viewModelScope.launch {
-            _state.value = FeedUiState.Loading
+        loadInitialData()
+    }
 
-            val categoriesResult = repository.getCategories()
-            val mealsResult = repository.getHomeFeed()
+    fun selectCategory(categoryName: String?) {
+        categoryJob?.cancel()
 
-            if (categoriesResult is Resource.Success && mealsResult is Resource.Success) {
-                _state.value = FeedUiState.Success(
-                    categories = categoriesResult.data,
-                    meals = mealsResult.data,
-                    allMeals = mealsResult.data,
-                    savedMealIds = emptySet(), // Will be updated by observeSavedMeals
-                    selectedCategory = null,
-                    isSearching = false,
-                    searchQuery = "",
-                    isLoadingCategory = false
-                )
-            } else {
-                val errorMessage = (categoriesResult as? Resource.Error)?.message
-                    ?: (mealsResult as? Resource.Error)?.message
-                    ?: "Unknown error"
-                _state.value = FeedUiState.Error(errorMessage)
+        categoryJob = viewModelScope.launch {
+            val current = _state.value as? FeedUiState.Success ?: return@launch
+            if (categoryName == current.selectedCategory) return@launch
+
+            _state.value = current.copy(isLoading = true, selectedCategory = categoryName)
+
+            try {
+                val result = if (categoryName == null) {
+                    repository.getHomeFeed()
+                } else {
+                    repository.getMealsByCategory(categoryName)
+                }
+
+                when (result) {
+                    is Resource.Success -> {
+                        val optimizedMeals = dedupe(result.data)
+                        val updated = _state.value as? FeedUiState.Success ?: return@launch
+                        _state.value = updated.copy(
+                            feedMeals = optimizedMeals,
+                            meals = optimizedMeals,
+                            isLoading = false
+                        )
+                    }
+                    is Resource.Error -> {
+                        _state.value = FeedUiState.Error(result.message)
+                    }
+                    is Resource.Loading -> Unit
+                }
+            } catch (_: Exception) {
+                val updated = _state.value as? FeedUiState.Success
+                if (updated != null) {
+                    _state.value = updated.copy(isLoading = false)
+                }
             }
         }
     }
 
-    fun selectCategory(categoryName: String?) {
-        viewModelScope.launch {
-            val currentState = _state.value
-            if (currentState is FeedUiState.Success) {
-                if (categoryName == null || categoryName == currentState.selectedCategory) {
-                    // Deselect or show all
-                    _state.value = currentState.copy(
-                        selectedCategory = null,
-                        meals = currentState.allMeals,
-                        isLoadingCategory = false
-                    )
-                } else {
-                    // Show loading while fetching category meals
-                    _state.value = currentState.copy(
-                        selectedCategory = categoryName,
-                        isLoadingCategory = true
-                    )
+    fun toggleSearchMode() {
+        val current = _state.value
+        if (current is FeedUiState.Success) {
+            val nowSearching = !current.isSearching
+            _state.value = current.copy(isSearching = nowSearching)
+            if (!nowSearching) {
+                // Leaving search: clear query and restore feed
+                onSearchQueryChange("")
+                val refreshed = _state.value
+                if (refreshed is FeedUiState.Success) {
+                    _state.value = refreshed.copy(meals = refreshed.feedMeals, isLoading = false)
+                }
+            }
+        }
+    }
 
-                    // Fetch meals for selected category
-                    when (val result = repository.getMealsByCategory(categoryName)) {
-                        is Resource.Success -> {
-                            val newState = _state.value
-                            if (newState is FeedUiState.Success) {
-                                _state.value = newState.copy(
-                                    meals = result.data,
-                                    selectedCategory = categoryName,
-                                    isLoadingCategory = false
-                                )
-                            }
-                        }
-                        is Resource.Error -> {
-                            // If error, show all meals
-                            _state.value = currentState.copy(
-                                selectedCategory = null,
-                                meals = currentState.allMeals,
-                                isLoadingCategory = false
-                            )
-                        }
+    fun toggleSave(meal: MealFeedItem) {
+        viewModelScope.launch {
+            val current = _state.value
+            if (current is FeedUiState.Success) {
+                val id = meal.idMeal ?: return@launch
+                if (current.savedMealIds.contains(id)) {
+                    repository.unsaveMeal(id)
+                } else {
+                    when (val detailResult = repository.getMealDetail(id)) {
+                        is Resource.Success -> repository.saveMeal(detailResult.data)
                         else -> Unit
                     }
                 }
@@ -124,131 +281,51 @@ class FeedViewModel(private val repository: MealRepository) : ViewModel() {
         }
     }
 
-    fun searchMeals(query: String) {
-        viewModelScope.launch {
-            val currentState = _state.value
-            if (currentState is FeedUiState.Success) {
-                _state.value = currentState.copy(searchQuery = query)
-
-                if (query.isBlank()) {
-                    // If query is empty, show all meals or filtered by category
-                    _state.value = currentState.copy(
-                        meals = if (currentState.selectedCategory != null) {
-                            currentState.meals
-                        } else {
-                            currentState.allMeals
-                        },
-                        searchQuery = ""
-                    )
-                    return@launch
-                }
-
-                // Search from API
-                when (val result = repository.searchMeals(query)) {
-                    is Resource.Success -> {
-                        // Convert MealDetail to MealFeedItem for display
-                        val searchResults = result.data.map { mealDetail ->
-                            MealFeedItem(
-                                idMeal = mealDetail.idMeal,
-                                strMeal = mealDetail.strMeal,
-                                strMealThumb = mealDetail.strMealThumb,
-                                strCategory = mealDetail.strCategory,
-                                strArea = mealDetail.strArea
-                            )
-                        }
-                        val newState = _state.value
-                        if (newState is FeedUiState.Success) {
-                            _state.value = newState.copy(
-                                meals = searchResults,
-                                searchQuery = query
-                            )
-                        }
-                    }
-                    is Resource.Error -> {
-                        // Keep current state on error
-                    }
-                    else -> Unit
-                }
-            }
-        }
-    }
-
-    fun toggleSearchMode() {
-        val currentState = _state.value
-        if (currentState is FeedUiState.Success) {
-            if (currentState.isSearching) {
-                // Exit search mode - restore original meals
-                _state.value = currentState.copy(
-                    isSearching = false,
-                    searchQuery = "",
-                    meals = if (currentState.selectedCategory != null) {
-                        currentState.meals
-                    } else {
-                        currentState.allMeals
-                    }
-                )
-            } else {
-                // Enter search mode
-                _state.value = currentState.copy(isSearching = true)
-            }
-        }
-    }
-
-    fun toggleSave(mealId: String) {
-        viewModelScope.launch {
-            val currentState = _state.value
-            if (currentState is FeedUiState.Success) {
-                if (currentState.savedMealIds.contains(mealId)) {
-                    repository.unsaveMeal(mealId)
-                } else {
-                    // Fetch meal detail and save it
-                    when (val result = repository.getMealDetail(mealId)) {
-                        is Resource.Success -> repository.saveMeal(result.data)
-                        else -> Unit // Handle error if needed
-                    }
-                }
-            }
-        }
-    }
-
     fun loadMoreMeals() {
-        viewModelScope.launch {
-            val currentState = _state.value
-            if (currentState is FeedUiState.Success &&
-                !currentState.isLoadingMore &&
-                currentState.selectedCategory == null &&
-                !currentState.isSearching) {
+        // Prevent multiple simultaneous load operations
+        if (loadMoreJob?.isActive == true) return
 
-                _state.value = currentState.copy(isLoadingMore = true)
+        loadMoreJob = viewModelScope.launch {
+            val current = _state.value as? FeedUiState.Success ?: return@launch
 
-                when (val result = repository.loadMoreMeals(6)) {
+            // Check conditions
+            if (current.isLoading ||
+                current.selectedCategory != null ||
+                current.isSearching ||
+                current.feedMeals.size >= MAX_FEED_ITEMS) {
+                return@launch
+            }
+
+            _state.value = current.copy(isLoading = true)
+
+            try {
+                when (val result = repository.loadMoreMeals(LOAD_MORE_COUNT)) {
                     is Resource.Success -> {
-                        val updatedMeals = currentState.meals + result.data
-                        val updatedAllMeals = currentState.allMeals + result.data
-                        _state.value = currentState.copy(
-                            meals = updatedMeals,
-                            allMeals = updatedAllMeals,
-                            isLoadingMore = false
+                        val updated = _state.value as? FeedUiState.Success ?: return@launch
+                        val combined = updated.feedMeals + result.data
+                        val optimizedMeals = dedupe(combined)
+
+                        _state.value = updated.copy(
+                            feedMeals = optimizedMeals,
+                            meals = optimizedMeals,
+                            isLoading = false
                         )
                     }
                     is Resource.Error -> {
-                        _state.value = currentState.copy(isLoadingMore = false)
+                        val updated = _state.value as? FeedUiState.Success
+                        if (updated != null) {
+                            _state.value = updated.copy(isLoading = false)
+                        }
                     }
-                    else -> {
-                        _state.value = currentState.copy(isLoadingMore = false)
-                    }
+                    is Resource.Loading -> Unit
+                }
+            } catch (_: Exception) {
+                val updated = _state.value as? FeedUiState.Success
+                if (updated != null) {
+                    _state.value = updated.copy(isLoading = false)
                 }
             }
         }
     }
 }
 
-class FeedViewModelFactory(private val repository: MealRepository) : ViewModelProvider.Factory {
-    @Suppress("UNCHECKED_CAST")
-    override fun <T : ViewModel> create(modelClass: Class<T>): T {
-        if (modelClass.isAssignableFrom(FeedViewModel::class.java)) {
-            return FeedViewModel(repository) as T
-        }
-        throw IllegalArgumentException("Unknown ViewModel class")
-    }
-}

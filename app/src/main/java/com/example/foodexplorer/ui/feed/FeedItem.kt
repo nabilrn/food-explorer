@@ -12,13 +12,13 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.outlined.FavoriteBorder
-import androidx.compose.material.icons.outlined.Share
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
@@ -31,16 +31,27 @@ fun FeedItem(
     meal: MealFeedItem,
     isSaved: Boolean,
     onMealClick: (String) -> Unit,
-    onToggleSave: (String) -> Unit,
-    onShare: (MealFeedItem) -> Unit = {},
+    onToggleSave: (MealFeedItem) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    // Remember subtitle to prevent recreation on every recomposition
+    val subtitle = remember(meal.strCategory, meal.strArea) {
+        buildString {
+            if (!meal.strCategory.isNullOrEmpty()) {
+                append(meal.strCategory)
+            }
+            if (!meal.strArea.isNullOrEmpty()) {
+                if (isNotEmpty()) append(" • ")
+                append(meal.strArea)
+            }
+        }
+    }
+
     Column(
         modifier = modifier
             .fillMaxWidth()
             .clickable { meal.idMeal?.let { onMealClick(it) } }
     ) {
-        // Full-width image with consistent aspect ratio
         MealImage(
             imageUrl = meal.strMealThumb,
             aspectRatio = 1.15f,
@@ -49,7 +60,6 @@ fun FeedItem(
 
         Spacer(modifier = Modifier.height(12.dp))
 
-        // Title and action row
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -57,24 +67,11 @@ fun FeedItem(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.Top
         ) {
-            // Title and category/origin column
             Column(modifier = Modifier.weight(1f)) {
-                // Large, bold title
                 MealTitle(
                     name = meal.strMeal,
                     modifier = Modifier.fillMaxWidth()
                 )
-
-                // Category and origin subtitle
-                val subtitle = buildString {
-                    if (!meal.strCategory.isNullOrEmpty()) {
-                        append(meal.strCategory)
-                    }
-                    if (!meal.strArea.isNullOrEmpty()) {
-                        if (isNotEmpty()) append(" • ")
-                        append(meal.strArea)
-                    }
-                }
 
                 if (subtitle.isNotEmpty()) {
                     Spacer(modifier = Modifier.height(6.dp))
@@ -86,32 +83,25 @@ fun FeedItem(
                 }
             }
 
-            // Minimal action icons
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
-                verticalAlignment = Alignment.CenterVertically
+            // Only save button, no share
+            IconButton(
+                onClick = { onToggleSave(meal) },
+                modifier = Modifier.size(40.dp)
             ) {
-                IconButton(
-                    onClick = { meal.idMeal?.let { onToggleSave(it) } },
-                    modifier = Modifier.size(40.dp)
-                ) {
-                    Icon(
-                        imageVector = if (isSaved) Icons.Filled.Favorite else Icons.Outlined.FavoriteBorder,
-                        contentDescription = if (isSaved) "Remove from saved" else "Save meal",
-                        modifier = Modifier.size(20.dp),
-                        tint = if (isSaved) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
+                Icon(
+                    imageVector = if (isSaved) Icons.Filled.Favorite else Icons.Outlined.FavoriteBorder,
+                    contentDescription = if (isSaved) "Remove from saved" else "Save meal",
+                    modifier = Modifier.size(20.dp),
+                    tint = if (isSaved) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
         }
 
         Spacer(modifier = Modifier.height(24.dp))
 
-        // Subtle divider
         HorizontalDivider(
             color = MaterialTheme.colorScheme.outline,
             thickness = 0.5.dp
         )
     }
 }
-

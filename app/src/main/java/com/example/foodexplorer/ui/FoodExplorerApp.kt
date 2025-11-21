@@ -37,24 +37,19 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInHorizontally
-import androidx.compose.animation.slideOutHorizontally
-import androidx.compose.animation.slideInVertically
-import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.core.tween
 import com.example.foodexplorer.data.api.MealApiService
 import com.example.foodexplorer.data.local.FoodExplorerDatabase
 import com.example.foodexplorer.data.repository.MealRepositoryImpl
 import com.example.foodexplorer.ui.detail.DetailScreen
 import com.example.foodexplorer.ui.detail.DetailViewModel
-import com.example.foodexplorer.ui.detail.DetailViewModelFactory
 import com.example.foodexplorer.ui.feed.FeedScreen
 import com.example.foodexplorer.ui.feed.FeedUiState
 import com.example.foodexplorer.ui.feed.FeedViewModel
-import com.example.foodexplorer.ui.feed.FeedViewModelFactory
 import com.example.foodexplorer.ui.nav.BottomNavItem
 import com.example.foodexplorer.ui.nav.Screen
 import com.example.foodexplorer.ui.saved.SavedScreen
+import com.example.foodexplorer.ui.splash.SplashScreen
 import com.example.foodexplorer.ui.theme.BottomNavGlass
 import com.example.foodexplorer.ui.theme.FoodExplorerTheme
 import kotlinx.coroutines.launch
@@ -84,14 +79,19 @@ fun FoodExplorerApp() {
         val snackbarHostState = remember { SnackbarHostState() }
         val scope = rememberCoroutineScope()
 
+        // Create a shared FeedViewModel that will be used across splash and feed screens
+        val feedViewModel: FeedViewModel = viewModel(factory = ViewModelFactory(repository))
+
         Scaffold(
             containerColor = MaterialTheme.colorScheme.background,
             snackbarHost = {
                 SnackbarHost(hostState = snackbarHostState)
             },
             bottomBar = {
-                // Only show bottom navigation on Feed and Saved screens, hide on detail
-                if (currentRoute != null && !currentRoute.startsWith("detail")) {
+                // Only show bottom navigation on Feed and Saved screens, hide on detail and splash
+                if (currentRoute != null &&
+                    !currentRoute.startsWith("detail") &&
+                    currentRoute != Screen.Splash.route) {
                     // Modern glass-effect bottom navigation
                     NavigationBar(
                         containerColor = BottomNavGlass,
@@ -143,59 +143,42 @@ fun FoodExplorerApp() {
         ) { innerPadding ->
             NavHost(
                 navController,
-                startDestination = Screen.Feed.route,
+                startDestination = Screen.Splash.route,
                 Modifier.padding(innerPadding)
             ) {
                 composable(
-                    route = Screen.Feed.route,
-                    enterTransition = {
-                        slideInHorizontally(
-                            initialOffsetX = { -it },
-                            animationSpec = tween(300)
-                        ) + fadeIn(animationSpec = tween(300))
-                    },
-                    exitTransition = {
-                        when (targetState.destination.route) {
-                            Screen.Saved.route -> slideOutHorizontally(
-                                targetOffsetX = { -it },
-                                animationSpec = tween(300)
-                            ) + fadeOut(animationSpec = tween(300))
-                            "detail/{mealId}" -> slideOutVertically(
-                                targetOffsetY = { -it / 4 },
-                                animationSpec = tween(300)
-                            ) + fadeOut(animationSpec = tween(200))
-                            else -> fadeOut(animationSpec = tween(300))
-                        }
-                    },
-                    popEnterTransition = {
-                        when (initialState.destination.route) {
-                            "detail/{mealId}" -> fadeIn(animationSpec = tween(300))
-                            else -> slideInHorizontally(
-                                initialOffsetX = { -it },
-                                animationSpec = tween(300)
-                            ) + fadeIn(animationSpec = tween(300))
-                        }
-                    },
-                    popExitTransition = {
-                        when (targetState.destination.route) {
-                            Screen.Saved.route -> slideOutHorizontally(
-                                targetOffsetX = { -it },
-                                animationSpec = tween(300)
-                            ) + fadeOut(animationSpec = tween(300))
-                            else -> fadeOut(animationSpec = tween(300))
-                        }
-                    }
+                    route = Screen.Splash.route,
+                    enterTransition = { fadeIn(animationSpec = tween(200)) },
+                    exitTransition = { fadeOut(animationSpec = tween(300)) }
                 ) {
-                    val feedViewModel: FeedViewModel =
-                        viewModel(factory = FeedViewModelFactory(repository))
                     val feedState = feedViewModel.state.collectAsState().value
+
+                    SplashScreen(
+                        onSplashFinished = {
+                            navController.navigate(Screen.Feed.route) {
+                                popUpTo(Screen.Splash.route) { inclusive = true }
+                            }
+                        },
+                        feedState = feedState
+                    )
+                }
+                composable(
+                    route = Screen.Feed.route,
+                    enterTransition = { fadeIn(animationSpec = tween(200)) },
+                    exitTransition = { fadeOut(animationSpec = tween(150)) },
+                    popEnterTransition = { fadeIn(animationSpec = tween(200)) },
+                    popExitTransition = { fadeOut(animationSpec = tween(150)) }
+                ) {
+                    val feedState = feedViewModel.state.collectAsState().value
+                    val searchQuery = feedViewModel.searchQuery.collectAsState().value
                     FeedScreen(
                         state = feedState,
+                        searchQuery = searchQuery,
                         onMealClick = { id -> navController.navigate("detail/$id") },
                         onRefresh = { feedViewModel.refresh() },
-                        onToggleSave = { mealId ->
-                            val isSaved = (feedState as? FeedUiState.Success)?.savedMealIds?.contains(mealId) ?: false
-                            feedViewModel.toggleSave(mealId)
+                        onToggleSave = { meal ->
+                            val isSaved = (feedState as? FeedUiState.Success)?.savedMealIds?.contains(meal.idMeal ?: "") ?: false
+                            feedViewModel.toggleSave(meal)
                             scope.launch {
                                 snackbarHostState.showSnackbar(
                                     message = if (isSaved) "Meal removed" else "Meal saved"
@@ -203,63 +186,17 @@ fun FoodExplorerApp() {
                             }
                         },
                         onCategoryClick = { category -> feedViewModel.selectCategory(category) },
-                        onSearchMeals = { query -> feedViewModel.searchMeals(query) },
+                        onSearchQueryChange = { q -> feedViewModel.onSearchQueryChange(q) },
                         onToggleSearchMode = { feedViewModel.toggleSearchMode() },
-                        onLoadMore = { feedViewModel.loadMoreMeals() },
-                        onShareMeal = { meal ->
-                            val shareText = buildString {
-                                append("Check out this recipe: ${meal.strMeal}\n\n")
-                                append("Discover more delicious recipes in Food Explorer app!")
-                            }
-                            val sendIntent = android.content.Intent().apply {
-                                action = android.content.Intent.ACTION_SEND
-                                putExtra(android.content.Intent.EXTRA_TEXT, shareText)
-                                type = "text/plain"
-                            }
-                            val shareIntent = android.content.Intent.createChooser(sendIntent, "Share recipe")
-                            context.startActivity(shareIntent)
-                        }
+                        onLoadMore = { feedViewModel.loadMoreMeals() }
                     )
                 }
                 composable(
                     route = Screen.Saved.route,
-                    enterTransition = {
-                        slideInHorizontally(
-                            initialOffsetX = { it },
-                            animationSpec = tween(300)
-                        ) + fadeIn(animationSpec = tween(300))
-                    },
-                    exitTransition = {
-                        when (targetState.destination.route) {
-                            Screen.Feed.route -> slideOutHorizontally(
-                                targetOffsetX = { it },
-                                animationSpec = tween(300)
-                            ) + fadeOut(animationSpec = tween(300))
-                            "detail/{mealId}" -> slideOutVertically(
-                                targetOffsetY = { -it / 4 },
-                                animationSpec = tween(300)
-                            ) + fadeOut(animationSpec = tween(200))
-                            else -> fadeOut(animationSpec = tween(300))
-                        }
-                    },
-                    popEnterTransition = {
-                        when (initialState.destination.route) {
-                            "detail/{mealId}" -> fadeIn(animationSpec = tween(300))
-                            else -> slideInHorizontally(
-                                initialOffsetX = { it },
-                                animationSpec = tween(300)
-                            ) + fadeIn(animationSpec = tween(300))
-                        }
-                    },
-                    popExitTransition = {
-                        when (targetState.destination.route) {
-                            Screen.Feed.route -> slideOutHorizontally(
-                                targetOffsetX = { it },
-                                animationSpec = tween(300)
-                            ) + fadeOut(animationSpec = tween(300))
-                            else -> fadeOut(animationSpec = tween(300))
-                        }
-                    }
+                    enterTransition = { fadeIn(animationSpec = tween(200)) },
+                    exitTransition = { fadeOut(animationSpec = tween(150)) },
+                    popEnterTransition = { fadeIn(animationSpec = tween(200)) },
+                    popExitTransition = { fadeOut(animationSpec = tween(150)) }
                 ) {
                     SavedScreen(
                         onMealClick = { id -> navController.navigate("detail/$id") },
@@ -268,28 +205,14 @@ fun FoodExplorerApp() {
                 }
                 composable(
                     route = "detail/{mealId}",
-                    enterTransition = {
-                        slideInVertically(
-                            initialOffsetY = { it },
-                            animationSpec = tween(400)
-                        ) + fadeIn(animationSpec = tween(400))
-                    },
-                    exitTransition = {
-                        fadeOut(animationSpec = tween(200))
-                    },
-                    popEnterTransition = {
-                        fadeIn(animationSpec = tween(300))
-                    },
-                    popExitTransition = {
-                        slideOutVertically(
-                            targetOffsetY = { it },
-                            animationSpec = tween(400)
-                        ) + fadeOut(animationSpec = tween(300))
-                    }
+                    enterTransition = { fadeIn(animationSpec = tween(250)) },
+                    exitTransition = { fadeOut(animationSpec = tween(150)) },
+                    popEnterTransition = { fadeIn(animationSpec = tween(200)) },
+                    popExitTransition = { fadeOut(animationSpec = tween(200)) }
                 ) { backStackEntry ->
                     val mealId = backStackEntry.arguments?.getString("mealId")!!
                     val detailViewModel: DetailViewModel = viewModel(
-                        factory = DetailViewModelFactory(repository, mealId)
+                        factory = ViewModelFactory(repository)
                     )
                     val isSaved = detailViewModel.isSaved.collectAsState().value
                     DetailScreen(

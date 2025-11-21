@@ -10,6 +10,7 @@ sealed class Screen(
     val title: String,
     val icon: ImageVector
 ) {
+    object Splash : Screen("splash", "Splash", Icons.Default.Home)
     object Feed : Screen("feed", "Feed", Icons.Default.Home)
     object Saved : Screen("saved", "Saved", Icons.Default.Favorite)
 }

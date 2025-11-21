@@ -1,5 +1,6 @@
 ﻿package com.example.foodexplorer.ui.feed
 
+import androidx.compose.foundation.gestures.ScrollableDefaults
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -10,7 +11,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.SearchOff
 import androidx.compose.material3.CircularProgressIndicator
@@ -22,10 +24,10 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
@@ -33,94 +35,77 @@ import com.example.foodexplorer.data.model.MealFeedItem
 import com.example.foodexplorer.ui.components.Categories
 import com.example.foodexplorer.ui.components.SearchBar
 import com.example.foodexplorer.ui.components.TopBar
-import kotlinx.coroutines.delay
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun FeedScreen(
     state: FeedUiState,
+    searchQuery: String,
     onMealClick: (String) -> Unit,
     onRefresh: () -> Unit,
-    onToggleSave: (String) -> Unit = {},
-    onCategoryClick: (String?) -> Unit = {},
-    onSearchMeals: (String) -> Unit = {},
-    onToggleSearchMode: () -> Unit = {},
-    onShareMeal: (MealFeedItem) -> Unit = {},
-    onLoadMore: () -> Unit = {},
+    onToggleSave: (MealFeedItem) -> Unit,
+    onCategoryClick: (String?) -> Unit,
+    onSearchQueryChange: (String) -> Unit,
+    onToggleSearchMode: () -> Unit,
+    onLoadMore: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    var searchQuery by remember { mutableStateOf("") }
-    var isRefreshing by remember { mutableStateOf(false) }
+    val listState = rememberLazyListState()
 
-    // Debounced search - auto search after user stops typing for 600ms
-    LaunchedEffect(searchQuery) {
-        if (searchQuery.isNotEmpty() && searchQuery.length >= 2) {
-            delay(600) // Wait 600ms after user stops typing
-            onSearchMeals(searchQuery)
+    // Detect scroll position for pagination
+    val shouldLoadMore by remember {
+        derivedStateOf {
+            val layoutInfo = listState.layoutInfo
+            val totalItems = layoutInfo.totalItemsCount
+            val lastVisibleItem = layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1
+
+            val threshold = 5
+            totalItems > 0 && lastVisibleItem >= (totalItems - threshold)
         }
     }
 
-    // Reset refreshing state when data is loaded
-    LaunchedEffect(state) {
-        if (state is FeedUiState.Success) {
-            isRefreshing = false
+    // Trigger load more when condition changes
+    LaunchedEffect(shouldLoadMore, state) {
+        if (shouldLoadMore && state is FeedUiState.Success) {
+            if (!state.isLoading &&
+                !state.isSearching &&
+                state.selectedCategory == null &&
+                state.meals.isNotEmpty()) {
+                onLoadMore()
+            }
         }
     }
 
     Column(modifier = modifier.fillMaxSize()) {
-        // TopBar with search icon or Search input
-        val currentState = state as? FeedUiState.Success
+        val successState = state as? FeedUiState.Success
 
-        if (currentState?.isSearching == true) {
-            // Show search bar in header when search mode is active
+        if (successState?.isSearching == true) {
             SearchBar(
                 query = searchQuery,
-                onQueryChange = { searchQuery = it },
-                onSearch = {
-                    // Manual search when Enter is pressed
-                    if (searchQuery.isNotEmpty()) {
-                        onSearchMeals(searchQuery)
-                    }
-                },
-                onClose = {
-                    searchQuery = ""
-                    onToggleSearchMode()
-                },
+                onQueryChange = onSearchQueryChange,
+                onSearch = {},
+                onClose = onToggleSearchMode,
                 placeholder = "Type to search (min. 2 characters)..."
             )
         } else {
-            // Show normal TopBar with search icon
             TopBar(
                 title = "Food Explorer",
-                onSearchClick = {
-                    onToggleSearchMode()
-                },
+                onSearchClick = onToggleSearchMode,
                 isSearchMode = false
             )
         }
 
         when (state) {
-            FeedUiState.Loading -> {
+            is FeedUiState.Loading -> {
                 Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(16.dp),
+                    modifier = Modifier.fillMaxSize(),
                     contentAlignment = Alignment.Center
-                ) {
-                    CircularProgressIndicator(
-                        color = MaterialTheme.colorScheme.primary,
-                        strokeWidth = 2.dp
-                    )
-                }
+                ) { CircularProgressIndicator() }
             }
-
             is FeedUiState.Error -> {
                 PullToRefreshBox(
-                    isRefreshing = isRefreshing,
-                    onRefresh = {
-                        isRefreshing = true
-                        onRefresh()
-                    },
+                    isRefreshing = false,
+                    onRefresh = onRefresh,
                     modifier = Modifier.fillMaxSize()
                 ) {
                     Column(
@@ -130,37 +115,28 @@ fun FeedScreen(
                         verticalArrangement = Arrangement.Center,
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
-                        Text(
-                            text = state.message,
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
+                        Text(text = state.message, style = MaterialTheme.typography.bodyMedium)
                         Spacer(modifier = Modifier.height(16.dp))
-                        TextButton(onClick = onRefresh) {
-                            Text(text = "Retry")
-                        }
+                        TextButton(onClick = onRefresh) { Text(text = "Retry") }
                     }
                 }
             }
-
             is FeedUiState.Success -> {
                 PullToRefreshBox(
-                    isRefreshing = isRefreshing,
-                    onRefresh = {
-                        isRefreshing = true
-                        onRefresh()
-                    },
+                    isRefreshing = state.isLoading,
+                    onRefresh = onRefresh,
                     modifier = Modifier.fillMaxSize()
                 ) {
                     LazyColumn(
+                        state = listState,
                         modifier = Modifier.fillMaxSize(),
-                        verticalArrangement = Arrangement.spacedBy(0.dp)
+                        flingBehavior = ScrollableDefaults.flingBehavior()
                     ) {
-
-                        // Show categories only when not searching
                         if (!state.isSearching) {
-                            item {
-                                Spacer(modifier = Modifier.height(8.dp))
+                            item(
+                                key = "categories",
+                                contentType = "header"
+                            ) {
                                 Categories(
                                     categories = state.categories,
                                     selectedCategory = state.selectedCategory,
@@ -170,103 +146,89 @@ fun FeedScreen(
                             }
                         }
 
-                        // Show loading indicator when filtering category
-                        if (state.isLoadingCategory) {
-                            item {
+                        if (state.meals.isEmpty() && !state.isLoading) {
+                            item(
+                                key = "empty",
+                                contentType = "empty"
+                            ) {
+                                EmptyState(isSearching = state.isSearching)
+                            }
+                        } else {
+                            itemsIndexed(
+                                items = state.meals,
+                                key = { index, meal ->
+                                    // Combine index with idMeal to ensure uniqueness
+                                    // Random API can return duplicate meal IDs
+                                    "${meal.idMeal ?: "unknown"}-$index"
+                                },
+                                contentType = { _, _ -> "meal_item" }
+                            ) { _, meal ->
+                                FeedItem(
+                                    meal = meal,
+                                    isSaved = meal.idMeal?.let { it in state.savedMealIds } == true,
+                                    onMealClick = onMealClick,
+                                    onToggleSave = { onToggleSave(meal) }
+                                )
+                            }
+                        }
+
+                        if (state.isLoading && state.meals.isNotEmpty()) {
+                            item(
+                                key = "loading",
+                                contentType = "loader"
+                            ) {
                                 Box(
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .padding(32.dp),
+                                        .padding(16.dp),
                                     contentAlignment = Alignment.Center
                                 ) {
                                     CircularProgressIndicator(
-                                        color = MaterialTheme.colorScheme.primary,
-                                        strokeWidth = 2.dp
+                                        strokeWidth = 2.dp,
+                                        modifier = Modifier.size(24.dp)
                                     )
-                                }
-                            }
-                        } else {
-                            // Show empty state if no meals found
-                            if (state.meals.isEmpty()) {
-                                item {
-                                    Box(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .padding(64.dp),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Column(
-                                            horizontalAlignment = Alignment.CenterHorizontally,
-                                            verticalArrangement = Arrangement.Center
-                                        ) {
-                                            if (state.isSearching) {
-                                                Icon(
-                                                    imageVector = Icons.Outlined.SearchOff,
-                                                    contentDescription = null,
-                                                    modifier = Modifier.size(64.dp),
-                                                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
-                                                )
-                                                Spacer(modifier = Modifier.height(16.dp))
-                                            }
-                                            Text(
-                                                text = if (state.isSearching) "No meals found" else "No meals available",
-                                                style = MaterialTheme.typography.titleMedium,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                                            )
-                                            Spacer(modifier = Modifier.height(8.dp))
-                                            Text(
-                                                text = if (state.isSearching)
-                                                    "Try a different search term"
-                                                else
-                                                    "Pull down to refresh",
-                                                style = MaterialTheme.typography.bodyMedium,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
-                                            )
-                                        }
-                                    }
-                                }
-                            } else {
-                                // Show meals list
-                                items(state.meals) { meal ->
-                                    FeedItem(
-                                        meal = meal,
-                                        isSaved = meal.idMeal in state.savedMealIds,
-                                        onMealClick = onMealClick,
-                                        onToggleSave = onToggleSave,
-                                        onShare = onShareMeal
-                                    )
-                                }
-
-                                // Load more indicator and trigger
-                                if (!state.isSearching && state.selectedCategory == null) {
-                                    item {
-                                        if (state.isLoadingMore) {
-                                            Box(
-                                                modifier = Modifier
-                                                    .fillMaxWidth()
-                                                    .padding(16.dp),
-                                                contentAlignment = Alignment.Center
-                                            ) {
-                                                CircularProgressIndicator(
-                                                    color = MaterialTheme.colorScheme.primary,
-                                                    strokeWidth = 2.dp,
-                                                    modifier = Modifier.size(24.dp)
-                                                )
-                                            }
-                                        } else {
-                                            // Trigger load more when this item is visible
-                                            LaunchedEffect(Unit) {
-                                                onLoadMore()
-                                            }
-                                            Spacer(modifier = Modifier.height(16.dp))
-                                        }
-                                    }
                                 }
                             }
                         }
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun EmptyState(isSearching: Boolean) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(64.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            if (isSearching) {
+                Icon(
+                    imageVector = Icons.Outlined.SearchOff,
+                    contentDescription = null,
+                    modifier = Modifier.size(64.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
+                )
+                Spacer(modifier = Modifier.height(16.dp))
+            }
+            Text(
+                text = if (isSearching) "No meals found" else "No meals available",
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                text = if (isSearching) "Try a different search term" else "Pull down to refresh",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+            )
         }
     }
 }

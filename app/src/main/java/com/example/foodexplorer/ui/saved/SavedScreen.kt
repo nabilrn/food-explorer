@@ -24,6 +24,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.foodexplorer.data.repository.MealRepository
+import com.example.foodexplorer.ui.ViewModelFactory
 import com.example.foodexplorer.ui.components.TopBar
 
 @Composable
@@ -32,14 +33,13 @@ fun SavedScreen(
     onMealClick: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val viewModel: SavedViewModel = viewModel(factory = SavedViewModelFactory(repository))
+    val viewModel: SavedViewModel = viewModel(factory = ViewModelFactory(repository))
     val savedMeals by viewModel.savedMeals.collectAsState()
 
     Column(modifier = modifier.fillMaxSize()) {
         TopBar(title = "Saved Meals")
 
         if (savedMeals.isEmpty()) {
-            // Empty state
             Box(
                 modifier = Modifier
                     .fillMaxSize()
@@ -72,12 +72,14 @@ fun SavedScreen(
                 }
             }
         } else {
-            // List of saved meals
             LazyColumn(modifier = Modifier.fillMaxSize()) {
-                item {
+                item(key = "spacer_top") {
                     Spacer(modifier = Modifier.height(8.dp))
                 }
-                items(savedMeals) { meal ->
+                items(
+                    items = savedMeals,
+                    key = { meal -> meal.idMeal ?: meal.hashCode() }
+                ) { meal ->
                     SavedMealItem(
                         meal = meal,
                         onMealClick = onMealClick,

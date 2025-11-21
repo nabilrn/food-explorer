@@ -12,6 +12,8 @@ import com.example.foodexplorer.data.util.IngredientParser
 import com.example.foodexplorer.data.util.NetworkUtils
 import com.example.foodexplorer.data.util.Resource
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
@@ -31,7 +33,6 @@ class MealRepositoryImpl(
     override suspend fun getHomeFeed(): Resource<List<MealFeedItem>> = withContext(Dispatchers.IO) {
         // Check if network is available
         if (!NetworkUtils.isNetworkAvailable(context)) {
-            // No internet - load from cache
             val cachedMeals = mealFeedDao.getLimit(20).map { it.toModel() }
             return@withContext if (cachedMeals.isNotEmpty()) {
                 Resource.Success(cachedMeals)
@@ -39,31 +40,27 @@ class MealRepositoryImpl(
                 Resource.Error("No internet connection and no cached data available")
             }
         }
-
-        // Internet available - fetch random meals with full details
         try {
-            val allMeals = mutableListOf<MealFeedItem>()
-
-            // Fetch only 6 random meals initially for faster loading
-            repeat(6) {
-                try {
-                    val randomResponse = apiService.getRandomMeal()
-                    if (randomResponse.isSuccessful) {
-                        randomResponse.body()?.meals?.firstOrNull()?.let { mealRaw ->
-                            val mealFeedItem = MealFeedItem(
-                                idMeal = mealRaw.idMeal,
-                                strMeal = mealRaw.strMeal,
-                                strMealThumb = mealRaw.strMealThumb,
-                                strCategory = mealRaw.strCategory,
-                                strArea = mealRaw.strArea
-                            )
-                            allMeals.add(mealFeedItem)
-                        }
-                    }
-                } catch (e: Exception) {
-                    // Continue with other random meals even if one fails
+            // Launch 15 parallel random fetches for initial load
+            val deferred = (1..15).map {
+                async {
+                    try {
+                        val resp = apiService.getRandomMeal()
+                        if (resp.isSuccessful) {
+                            resp.body()?.meals?.firstOrNull()?.let { m ->
+                                MealFeedItem(
+                                    idMeal = m.idMeal,
+                                    strMeal = m.strMeal,
+                                    strMealThumb = m.strMealThumb,
+                                    strCategory = m.strCategory,
+                                    strArea = m.strArea
+                                )
+                            }
+                        } else null
+                    } catch (_: Exception) { null }
                 }
             }
+            val allMeals = deferred.awaitAll().filterNotNull()
 
             if (allMeals.isNotEmpty()) {
                 // Save to cache
@@ -96,30 +93,27 @@ class MealRepositoryImpl(
         }
 
         try {
-            val newMeals = mutableListOf<MealFeedItem>()
-
-            repeat(count) {
-                try {
-                    val randomResponse = apiService.getRandomMeal()
-                    if (randomResponse.isSuccessful) {
-                        randomResponse.body()?.meals?.firstOrNull()?.let { mealRaw ->
-                            val mealFeedItem = MealFeedItem(
-                                idMeal = mealRaw.idMeal,
-                                strMeal = mealRaw.strMeal,
-                                strMealThumb = mealRaw.strMealThumb,
-                                strCategory = mealRaw.strCategory,
-                                strArea = mealRaw.strArea
-                            )
-                            newMeals.add(mealFeedItem)
-                        }
-                    }
-                } catch (e: Exception) {
-                    // Continue with other random meals even if one fails
+            val deferred = (1..count).map {
+                async {
+                    try {
+                        val resp = apiService.getRandomMeal()
+                        if (resp.isSuccessful) {
+                            resp.body()?.meals?.firstOrNull()?.let { m ->
+                                MealFeedItem(
+                                    idMeal = m.idMeal,
+                                    strMeal = m.strMeal,
+                                    strMealThumb = m.strMealThumb,
+                                    strCategory = m.strCategory,
+                                    strArea = m.strArea
+                                )
+                            }
+                        } else null
+                    } catch (_: Exception) { null }
                 }
             }
+            val newMeals = deferred.awaitAll().filterNotNull()
 
             if (newMeals.isNotEmpty()) {
-                // Append to cache
                 mealFeedDao.insertAll(newMeals.map { it.toEntity() })
                 Resource.Success(newMeals)
             } else {

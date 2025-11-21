@@ -17,9 +17,9 @@ import com.example.foodexplorer.data.model.Category
 @Composable
 fun Categories(
     categories: List<Category>,
+    modifier: Modifier = Modifier,
     selectedCategory: String? = null,
-    onCategoryClick: (String?) -> Unit = {},
-    modifier: Modifier = Modifier
+    onCategoryClick: (String?) -> Unit = {}
 ) {
     Column(modifier = modifier.padding(vertical = 16.dp)) {
         Text(
@@ -33,7 +33,10 @@ fun Categories(
             contentPadding = PaddingValues(horizontal = 16.dp),
             horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(0.dp)
         ) {
-            items(categories) { category ->
+            items(
+                items = categories,
+                key = { category -> category.idCategory ?: category.strCategory ?: category.hashCode() }
+            ) { category ->
                 val categoryName = category.strCategory
                 CategoryItem(
                     category = category,

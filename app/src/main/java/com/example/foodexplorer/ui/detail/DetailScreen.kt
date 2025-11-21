@@ -1,7 +1,6 @@
 package com.example.foodexplorer.ui.detail
 
 import android.content.Intent
-import android.net.Uri
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -25,6 +24,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.core.net.toUri
 import com.example.foodexplorer.ui.components.TopBar
 
 @Composable
@@ -76,7 +76,7 @@ fun DetailScreen(
 
             is DetailUiState.Success -> {
                 TopBar(
-                    title = state.meal.strMeal ?: "Detail",
+                    title = "Detail",
                     onNavigationClick = onBack
                 )
                 val context = LocalContext.current
@@ -130,7 +130,7 @@ fun DetailScreen(
                 if (!state.meal.strYoutube.isNullOrEmpty()) {
                     Button(
                         onClick = {
-                            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(state.meal.strYoutube))
+                            val intent = Intent(Intent.ACTION_VIEW, state.meal.strYoutube.toUri())
                             context.startActivity(intent)
                         },
                         modifier = Modifier

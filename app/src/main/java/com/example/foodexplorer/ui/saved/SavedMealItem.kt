@@ -41,7 +41,6 @@ fun SavedMealItem(
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Small thumbnail
             AsyncImage(
                 model = meal.strMealThumb,
                 contentDescription = meal.strMeal,
@@ -51,7 +50,6 @@ fun SavedMealItem(
                 contentScale = ContentScale.Crop
             )
 
-            // Meal info
             Column(
                 modifier = Modifier.weight(1f),
                 verticalArrangement = Arrangement.spacedBy(4.dp)
@@ -64,7 +62,6 @@ fun SavedMealItem(
                     overflow = TextOverflow.Ellipsis
                 )
 
-                // Category and origin
                 val subtitle = buildString {
                     if (!meal.strCategory.isNullOrEmpty()) {
                         append(meal.strCategory)
@@ -86,7 +83,6 @@ fun SavedMealItem(
                 }
             }
 
-            // Unsave button
             IconButton(
                 onClick = { meal.idMeal?.let { onUnsave(it) } },
                 modifier = Modifier.size(40.dp)
