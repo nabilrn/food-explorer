@@ -22,18 +22,15 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.viewmodel.compose.viewModel
-import com.example.foodexplorer.data.repository.MealRepository
-import com.example.foodexplorer.ui.ViewModelFactory
+import androidx.hilt.navigation.compose.hiltViewModel
 import com.example.foodexplorer.ui.components.TopBar
 
 @Composable
 fun SavedScreen(
-    repository: MealRepository,
     onMealClick: (String) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    viewModel: SavedViewModel = hiltViewModel()
 ) {
-    val viewModel: SavedViewModel = viewModel(factory = ViewModelFactory(repository))
     val savedMeals by viewModel.savedMeals.collectAsState()
 
     Column(modifier = modifier.fillMaxSize()) {

@@ -6,10 +6,12 @@ import androidx.lifecycle.viewModelScope
 import com.example.foodexplorer.data.model.MealDetail
 import com.example.foodexplorer.data.repository.MealRepository
 import com.example.foodexplorer.data.util.Resource
+import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import javax.inject.Inject
 
 sealed interface DetailUiState {
     object Loading : DetailUiState
@@ -17,7 +19,8 @@ sealed interface DetailUiState {
     data class Error(val message: String) : DetailUiState
 }
 
-class DetailViewModel(
+@HiltViewModel
+class DetailViewModel @Inject constructor(
     private val repository: MealRepository,
     savedStateHandle: SavedStateHandle
 ) : ViewModel() {
@@ -79,5 +82,3 @@ class DetailViewModel(
         const val MEAL_ID_KEY = "mealId"
     }
 }
-
-

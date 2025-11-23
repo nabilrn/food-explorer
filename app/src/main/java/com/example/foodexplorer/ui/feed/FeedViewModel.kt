@@ -1,12 +1,12 @@
 package com.example.foodexplorer.ui.feed
 
 import androidx.lifecycle.ViewModel
-import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.example.foodexplorer.data.model.Category
 import com.example.foodexplorer.data.model.MealFeedItem
 import com.example.foodexplorer.data.repository.MealRepository
 import com.example.foodexplorer.data.util.Resource
+import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.Job
@@ -20,6 +20,7 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.mapLatest
 import kotlinx.coroutines.launch
+import javax.inject.Inject
 
 sealed interface FeedUiState {
     object Loading : FeedUiState
@@ -36,7 +37,8 @@ sealed interface FeedUiState {
     data class Error(val message: String) : FeedUiState
 }
 
-class FeedViewModel(private val repository: MealRepository) : ViewModel() {
+@HiltViewModel
+class FeedViewModel @Inject constructor(private val repository: MealRepository) : ViewModel() {
 
     companion object {
         private const val MAX_FEED_ITEMS = 50 // Increased untuk more scrolling
@@ -101,9 +103,14 @@ class FeedViewModel(private val repository: MealRepository) : ViewModel() {
                         meals = optimizedMeals
                     )
                 } else {
-                    val errorMessage = (catRes as? Resource.Error)?.message
-                        ?: (feedRes as? Resource.Error)?.message
-                        ?: "Failed to load feed"
+                    val feedErrorMessage = (feedRes as? Resource.Error)?.message
+                    val categoryErrorMessage = (catRes as? Resource.Error)?.message
+
+                    val errorMessage = if (feedErrorMessage?.startsWith("No network") == true) {
+                        feedErrorMessage
+                    } else {
+                        feedErrorMessage ?: categoryErrorMessage ?: "Failed to load feed"
+                    }
                     _state.value = FeedUiState.Error(errorMessage)
                 }
             } catch (e: Exception) {
@@ -328,4 +335,3 @@ class FeedViewModel(private val repository: MealRepository) : ViewModel() {
         }
     }
 }
-

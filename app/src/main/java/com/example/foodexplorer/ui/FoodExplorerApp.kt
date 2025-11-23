@@ -23,12 +23,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.core.view.WindowCompat
-import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavDestination.Companion.hierarchy
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.compose.NavHost
@@ -38,9 +37,6 @@ import androidx.navigation.compose.rememberNavController
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.core.tween
-import com.example.foodexplorer.data.api.MealApiService
-import com.example.foodexplorer.data.local.FoodExplorerDatabase
-import com.example.foodexplorer.data.repository.MealRepositoryImpl
 import com.example.foodexplorer.ui.detail.DetailScreen
 import com.example.foodexplorer.ui.detail.DetailViewModel
 import com.example.foodexplorer.ui.feed.FeedScreen
@@ -58,7 +54,6 @@ import kotlinx.coroutines.launch
 fun FoodExplorerApp() {
     FoodExplorerTheme {
         val view = LocalView.current
-        val context = LocalContext.current
 
         // Set status bar to show dark icons (for light background)
         SideEffect {
@@ -68,10 +63,6 @@ fun FoodExplorerApp() {
             }
         }
 
-        val repository = remember {
-            val db = FoodExplorerDatabase.getDatabase(context)
-            MealRepositoryImpl(context, MealApiService.create(), db)
-        }
         val navController = rememberNavController()
         val navBackStackEntry by navController.currentBackStackEntryAsState()
         val currentRoute = navBackStackEntry?.destination?.route
@@ -80,7 +71,7 @@ fun FoodExplorerApp() {
         val scope = rememberCoroutineScope()
 
         // Create a shared FeedViewModel that will be used across splash and feed screens
-        val feedViewModel: FeedViewModel = viewModel(factory = ViewModelFactory(repository))
+        val feedViewModel: FeedViewModel = hiltViewModel()
 
         Scaffold(
             containerColor = MaterialTheme.colorScheme.background,
@@ -200,7 +191,7 @@ fun FoodExplorerApp() {
                 ) {
                     SavedScreen(
                         onMealClick = { id -> navController.navigate("detail/$id") },
-                        repository = repository
+                        viewModel = hiltViewModel()
                     )
                 }
                 composable(
@@ -211,9 +202,7 @@ fun FoodExplorerApp() {
                     popExitTransition = { fadeOut(animationSpec = tween(200)) }
                 ) { backStackEntry ->
                     val mealId = backStackEntry.arguments?.getString("mealId")!!
-                    val detailViewModel: DetailViewModel = viewModel(
-                        factory = ViewModelFactory(repository)
-                    )
+                    val detailViewModel: DetailViewModel = hiltViewModel()
                     val isSaved = detailViewModel.isSaved.collectAsState().value
                     DetailScreen(
                         state = detailViewModel.state.collectAsState().value,

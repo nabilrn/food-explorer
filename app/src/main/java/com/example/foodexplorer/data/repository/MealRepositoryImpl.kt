@@ -27,21 +27,13 @@ class MealRepositoryImpl(
     db: FoodExplorerDatabase
 ) : MealRepository {
 
-    private val mealFeedDao = db.mealFeedDao()
     private val mealDetailDao = db.mealDetailDao()
 
     override suspend fun getHomeFeed(): Resource<List<MealFeedItem>> = withContext(Dispatchers.IO) {
-        // Check if network is available
         if (!NetworkUtils.isNetworkAvailable(context)) {
-            val cachedMeals = mealFeedDao.getLimit(20).map { it.toModel() }
-            return@withContext if (cachedMeals.isNotEmpty()) {
-                Resource.Success(cachedMeals)
-            } else {
-                Resource.Error("No internet connection and no cached data available")
-            }
+            return@withContext Resource.Error("No network, see your saved meals")
         }
         try {
-            // Launch 15 parallel random fetches for initial load
             val deferred = (1..15).map {
                 async {
                     try {
@@ -63,27 +55,12 @@ class MealRepositoryImpl(
             val allMeals = deferred.awaitAll().filterNotNull()
 
             if (allMeals.isNotEmpty()) {
-                // Save to cache
-                mealFeedDao.deleteAll()
-                mealFeedDao.insertAll(allMeals.map { it.toEntity() })
                 Resource.Success(allMeals)
             } else {
-                // If no meals from API, load from cache
-                val cachedMeals = mealFeedDao.getLimit(20).map { it.toModel() }
-                if (cachedMeals.isNotEmpty()) {
-                    Resource.Success(cachedMeals)
-                } else {
-                    Resource.Error("No meals available")
-                }
+                Resource.Error("No Network, See Your Saved Meal")
             }
         } catch (e: Exception) {
-            // On any error, try loading from cache
-            val cachedMeals = mealFeedDao.getLimit(20).map { it.toModel() }
-            if (cachedMeals.isNotEmpty()) {
-                Resource.Success(cachedMeals)
-            } else {
-                Resource.Error("Couldn't fetch feed. Please check your internet connection.", e)
-            }
+            Resource.Error("Couldn't fetch feed. Please check your internet connection.", e)
         }
     }
 
@@ -114,7 +91,6 @@ class MealRepositoryImpl(
             val newMeals = deferred.awaitAll().filterNotNull()
 
             if (newMeals.isNotEmpty()) {
-                mealFeedDao.insertAll(newMeals.map { it.toEntity() })
                 Resource.Success(newMeals)
             } else {
                 Resource.Error("Failed to load more meals")
@@ -150,11 +126,10 @@ class MealRepositoryImpl(
             return@withContext if (cachedMeal != null) {
                 Resource.Success(cachedMeal)
             } else {
-                Resource.Error("No internet connection and meal not cached")
+                Resource.Error("No network, see your saved meals")
             }
         }
 
-        // Internet available - fetch from API
         try {
             val response = apiService.getMealDetail(idMeal)
             if (response.isSuccessful) {
@@ -180,20 +155,8 @@ class MealRepositoryImpl(
                     strYoutube = meal.strYoutube,
                     ingredients = ingredients
                 )
-
-                // Save to cache
-                val existingMeal = mealDetailDao.getMealById(idMeal)
-                val isSaved = existingMeal?.isSaved ?: false
-                val savedAt = existingMeal?.savedAt ?: 0L
-
-                mealDetailDao.insert(mealDetail.toEntity().copy(
-                    isSaved = isSaved,
-                    savedAt = savedAt
-                ))
-
                 Resource.Success(mealDetail)
             } else {
-                // If API fails, try loading from cache
                 val cachedMeal = mealDetailDao.getMealById(idMeal)?.toModel()
                 if (cachedMeal != null) {
                     Resource.Success(cachedMeal)
@@ -202,7 +165,6 @@ class MealRepositoryImpl(
                 }
             }
         } catch (e: Exception) {
-            // On any error, try loading from cache
             val cachedMeal = mealDetailDao.getMealById(idMeal)?.toModel()
             if (cachedMeal != null) {
                 Resource.Success(cachedMeal)
@@ -268,7 +230,7 @@ class MealRepositoryImpl(
         } catch (e: SocketTimeoutException) {
             Resource.Error("Request timed out", e)
         } catch (e: IOException) {
-            Resource.Error("Network error", e)
+            Resource.Error("No Network, See Your Saved Meal", e)
         } catch (e: HttpException) {
             Resource.Error("HTTP error ${e.code()}", e)
         } catch (e: Exception) {
