@@ -1,6 +1,16 @@
 package com.example.foodexplorer.ui
 
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.Home
@@ -14,6 +24,7 @@ import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.SideEffect
@@ -22,11 +33,11 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.core.view.WindowCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavDestination.Companion.hierarchy
@@ -35,9 +46,6 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.core.tween
 import com.example.foodexplorer.data.api.MealApiService
 import com.example.foodexplorer.data.local.FoodExplorerDatabase
 import com.example.foodexplorer.data.repository.MealRepositoryImpl
@@ -50,7 +58,6 @@ import com.example.foodexplorer.ui.nav.BottomNavItem
 import com.example.foodexplorer.ui.nav.Screen
 import com.example.foodexplorer.ui.saved.SavedScreen
 import com.example.foodexplorer.ui.splash.SplashScreen
-import com.example.foodexplorer.ui.theme.BottomNavGlass
 import com.example.foodexplorer.ui.theme.FoodExplorerTheme
 import kotlinx.coroutines.launch
 
@@ -59,12 +66,12 @@ fun FoodExplorerApp() {
     FoodExplorerTheme {
         val view = LocalView.current
         val context = LocalContext.current
+        val darkTheme = isSystemInDarkTheme()
 
-        // Set status bar to show dark icons (for light background)
         SideEffect {
             val window = (view.context as? android.app.Activity)?.window
             window?.let {
-                WindowCompat.getInsetsController(it, view).isAppearanceLightStatusBars = true
+                WindowCompat.getInsetsController(it, view).isAppearanceLightStatusBars = !darkTheme
             }
         }
 
@@ -78,81 +85,77 @@ fun FoodExplorerApp() {
 
         val snackbarHostState = remember { SnackbarHostState() }
         val scope = rememberCoroutineScope()
-
-        // Create a shared FeedViewModel that will be used across splash and feed screens
         val feedViewModel: FeedViewModel = viewModel(factory = ViewModelFactory(repository))
 
         Scaffold(
             containerColor = MaterialTheme.colorScheme.background,
-            snackbarHost = {
-                SnackbarHost(hostState = snackbarHostState)
-            },
+            snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
+            contentWindowInsets = androidx.compose.foundation.layout.WindowInsets(0, 0, 0, 0),
             bottomBar = {
-                // Only show bottom navigation on Feed and Saved screens, hide on detail and splash
                 if (currentRoute != null &&
                     !currentRoute.startsWith("detail") &&
-                    currentRoute != Screen.Splash.route) {
-                    // Modern glass-effect bottom navigation
-                    NavigationBar(
-                        containerColor = BottomNavGlass,
-                        tonalElevation = 0.dp
-                    ) {
-                        val currentDestination = navBackStackEntry?.destination
-                        val items = listOf(BottomNavItem.Feed, BottomNavItem.Saved)
-                        items.forEach { screen ->
-                            val isSelected = currentDestination?.hierarchy?.any { it.route == screen.route } == true
-                            NavigationBarItem(
-                                icon = {
-                                    Icon(
-                                        imageVector = when (screen.route) {
-                                            Screen.Feed.route -> if (isSelected) Icons.Filled.Home else Icons.Outlined.Home
-                                            Screen.Saved.route -> if (isSelected) Icons.Filled.Favorite else Icons.Outlined.FavoriteBorder
-                                            else -> screen.icon
-                                        },
-                                        contentDescription = null
-                                    )
-                                },
-                                label = {
-                                    Text(
-                                        text = screen.title,
-                                        style = MaterialTheme.typography.labelSmall
-                                    )
-                                },
-                                selected = isSelected,
-                                onClick = {
-                                    navController.navigate(screen.route) {
-                                        popUpTo(navController.graph.findStartDestination().id) {
-                                            saveState = true
+                    currentRoute != Screen.Splash.route
+                ) {
+                    Surface(border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.7f))) {
+                        NavigationBar(
+                            modifier = Modifier.navigationBarsPadding(),
+                            containerColor = MaterialTheme.colorScheme.surface,
+                            tonalElevation = 0.dp
+                        ) {
+                            val currentDestination = navBackStackEntry?.destination
+                            val items = listOf(BottomNavItem.Feed, BottomNavItem.Saved)
+                            items.forEach { screen ->
+                                val isSelected = currentDestination?.hierarchy?.any { it.route == screen.route } == true
+                                NavigationBarItem(
+                                    icon = {
+                                        Icon(
+                                            imageVector = when (screen.route) {
+                                                Screen.Feed.route -> if (isSelected) Icons.Filled.Home else Icons.Outlined.Home
+                                                Screen.Saved.route -> if (isSelected) Icons.Filled.Favorite else Icons.Outlined.FavoriteBorder
+                                                else -> screen.icon
+                                            },
+                                            contentDescription = null
+                                        )
+                                    },
+                                    label = {
+                                        Text(
+                                            text = screen.title,
+                                            style = MaterialTheme.typography.labelMedium
+                                        )
+                                    },
+                                    selected = isSelected,
+                                    onClick = {
+                                        navController.navigate(screen.route) {
+                                            popUpTo(navController.graph.findStartDestination().id) { saveState = true }
+                                            launchSingleTop = true
+                                            restoreState = true
                                         }
-                                        launchSingleTop = true
-                                        restoreState = true
-                                    }
-                                },
-                                colors = NavigationBarItemDefaults.colors(
-                                    selectedIconColor = MaterialTheme.colorScheme.primary,
-                                    selectedTextColor = MaterialTheme.colorScheme.primary,
-                                    unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    indicatorColor = Color.Transparent
+                                    },
+                                    colors = NavigationBarItemDefaults.colors(
+                                        selectedIconColor = MaterialTheme.colorScheme.primary,
+                                        selectedTextColor = MaterialTheme.colorScheme.primary,
+                                        unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        indicatorColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
+                                    )
                                 )
-                            )
+                            }
                         }
                     }
                 }
             }
         ) { innerPadding ->
             NavHost(
-                navController,
+                navController = navController,
                 startDestination = Screen.Splash.route,
-                Modifier.padding(innerPadding)
+                modifier = Modifier.padding(innerPadding)
             ) {
                 composable(
                     route = Screen.Splash.route,
-                    enterTransition = { fadeIn(animationSpec = tween(200)) },
-                    exitTransition = { fadeOut(animationSpec = tween(300)) }
+                    enterTransition = { fadeIn(animationSpec = tween(300)) + slideInVertically(tween(300)) { 30 } },
+                    exitTransition = { fadeOut(animationSpec = tween(200)) }
                 ) {
                     val feedState = feedViewModel.state.collectAsState().value
-
                     SplashScreen(
                         onSplashFinished = {
                             navController.navigate(Screen.Feed.route) {
@@ -162,12 +165,11 @@ fun FoodExplorerApp() {
                         feedState = feedState
                     )
                 }
+
                 composable(
                     route = Screen.Feed.route,
-                    enterTransition = { fadeIn(animationSpec = tween(200)) },
-                    exitTransition = { fadeOut(animationSpec = tween(150)) },
-                    popEnterTransition = { fadeIn(animationSpec = tween(200)) },
-                    popExitTransition = { fadeOut(animationSpec = tween(150)) }
+                    enterTransition = { fadeIn(animationSpec = tween(300)) + slideInVertically(tween(300)) { 30 } },
+                    exitTransition = { fadeOut(animationSpec = tween(200)) }
                 ) {
                     val feedState = feedViewModel.state.collectAsState().value
                     val searchQuery = feedViewModel.searchQuery.collectAsState().value
@@ -177,12 +179,12 @@ fun FoodExplorerApp() {
                         onMealClick = { id -> navController.navigate("detail/$id") },
                         onRefresh = { feedViewModel.refresh() },
                         onToggleSave = { meal ->
-                            val isSaved = (feedState as? FeedUiState.Success)?.savedMealIds?.contains(meal.idMeal ?: "") ?: false
+                            val isSaved = (feedState as? FeedUiState.Success)
+                                ?.savedMealIds
+                                ?.contains(meal.idMeal ?: "") == true
                             feedViewModel.toggleSave(meal)
                             scope.launch {
-                                snackbarHostState.showSnackbar(
-                                    message = if (isSaved) "Meal removed" else "Meal saved"
-                                )
+                                snackbarHostState.showSnackbar(if (isSaved) "Meal removed" else "Meal saved")
                             }
                         },
                         onCategoryClick = { category -> feedViewModel.selectCategory(category) },
@@ -191,29 +193,25 @@ fun FoodExplorerApp() {
                         onLoadMore = { feedViewModel.loadMoreMeals() }
                     )
                 }
+
                 composable(
                     route = Screen.Saved.route,
-                    enterTransition = { fadeIn(animationSpec = tween(200)) },
-                    exitTransition = { fadeOut(animationSpec = tween(150)) },
-                    popEnterTransition = { fadeIn(animationSpec = tween(200)) },
-                    popExitTransition = { fadeOut(animationSpec = tween(150)) }
+                    enterTransition = { fadeIn(animationSpec = tween(300)) + slideInVertically(tween(300)) { 30 } },
+                    exitTransition = { fadeOut(animationSpec = tween(200)) }
                 ) {
                     SavedScreen(
                         onMealClick = { id -> navController.navigate("detail/$id") },
                         repository = repository
                     )
                 }
+
                 composable(
                     route = "detail/{mealId}",
-                    enterTransition = { fadeIn(animationSpec = tween(250)) },
-                    exitTransition = { fadeOut(animationSpec = tween(150)) },
-                    popEnterTransition = { fadeIn(animationSpec = tween(200)) },
-                    popExitTransition = { fadeOut(animationSpec = tween(200)) }
+                    enterTransition = { fadeIn(animationSpec = tween(300)) + slideInVertically(tween(300)) { 30 } },
+                    exitTransition = { fadeOut(animationSpec = tween(200)) }
                 ) { backStackEntry ->
                     val mealId = backStackEntry.arguments?.getString("mealId")!!
-                    val detailViewModel: DetailViewModel = viewModel(
-                        factory = ViewModelFactory(repository)
-                    )
+                    val detailViewModel: DetailViewModel = viewModel(factory = ViewModelFactory(repository))
                     val isSaved = detailViewModel.isSaved.collectAsState().value
                     DetailScreen(
                         state = detailViewModel.state.collectAsState().value,
@@ -223,9 +221,7 @@ fun FoodExplorerApp() {
                         onToggleSave = {
                             detailViewModel.toggleSave()
                             scope.launch {
-                                snackbarHostState.showSnackbar(
-                                    message = if (isSaved) "Meal removed" else "Meal saved"
-                                )
+                                snackbarHostState.showSnackbar(if (isSaved) "Meal removed" else "Meal saved")
                             }
                         }
                     )
