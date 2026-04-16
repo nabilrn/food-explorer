@@ -6,15 +6,19 @@ import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 
 class ListConverter {
+    private val gson = Gson()
+    private val ingredientListType = TypeToken.getParameterized(
+        List::class.java,
+        Ingredient::class.java
+    ).type
+
     @TypeConverter
     fun fromString(value: String): List<Ingredient> {
-        val listType = object : TypeToken<List<Ingredient>>() {}.type
-        return Gson().fromJson(value, listType)
+        return gson.fromJson(value, ingredientListType)
     }
 
     @TypeConverter
     fun fromList(list: List<Ingredient>): String {
-        val gson = Gson()
         return gson.toJson(list)
     }
 }
